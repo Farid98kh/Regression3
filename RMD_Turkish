@@ -1,0 +1,584 @@
+---
+title: "Denetimli İstatistiksel Öğrenme Arasınavı"
+author: "Farid KHORSHIDI"
+date: "2023-11-30"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+    number_sections: true
+    toc: true
+    toc_depth: 3
+    fig_caption: yes
+    df_print: kable
+    highlight: tango
+header-includes:
+  - "\\usepackage{fontspec}"
+  - "\\setmainfont{Times New Roman}"
+  - "\\renewcommand{\\normalsize}{\\fontsize{10}{12}\\selectfont}" 
+  - "\\usepackage{hyperref}"
+  - "\\hypersetup{pdfpagelayout=SinglePage}"  
+  - "\\hypersetup{pdfstartview=FitH}"  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE, fig.align = 'center', out.width = "100%", out.height = "100%")
+
+```
+
+
+```{r Kütüphaneler, include=FALSE}
+# Kütüphaneler
+library(ISLR)
+library(Hmisc)
+library(corrplot)
+library(nortest)
+library(caret)
+library(dplyr)
+library(psych)
+library(lmtest)
+library(car)
+library(olsrr)
+library(RColorBrewer)
+library(tidyverse)
+library(magrittr)
+library(ModelMetrics)
+library(mice)
+library(GGally)
+library(tidyr)
+library(ggplot2)
+library(base)
+library(olsrr)
+library(e1071)
+```
+
+# Veri Seti
+**Bu Veri Setinde çoklu doğrusal regresyon modellemesiyle `Satış` veya satış mikatarının çeşitli konumlarda Tahmin edilmesi amaçlamaktadır.**
+
+```{r}
+head(Carseats)
+```
+
+```{r echo=FALSE}
+for(i in 1:11){
+  print(paste(names(Carseats[i]),sep = "", "----class:" ,class(Carseats[,i])))
+}
+```
+```{r echo=FALSE}
+dim(Carseats)
+```
+*400 tane farkli konumdan toplanmiş veriler incelenecektir.*
+
+**Değişkenler** 
+
+
+1. Satışlar: Her konumdaki birim satışlar ( * bin tane). Şirketin 400 lokasyonda mağazalarının araba koltuları sattığı sayıdır, çeşitli yerel ve topluluk faktörler her bölgede bu sayıyı etkileyebilir.
+2. CompPrice: Rakip tarafından her lokasyonda alınan fiyat. Rakibın farklı bölgelerde çeşitli yerel ve topluluk faktörlerini analize etmekle belirlediği fiyattır, söz konusu işletmenin rekabetçi markette kalması için ComPrice önem arzetmektedir.
+
+3. Gelir: Topluluk gelir düzeyi (bin dolar cinsinden).
+
+4. Reklam: Her konum için yerel reklam bütçesi.
+
+5. Nüfus: Bölgedeki nüfus büyüklüğü (bin kişi).
+
+6. Fiyat: Her lokasyonda araba koltukları için alınan fiyat. Şirketin 400 lokasyonda mağazalarına araba koltuları hakkında belirlediği maliyet artı fiyatlandırma sonucu net fiyatıdır, çeşitli yerel ve topluluk faktörler her bölgede bu sayıyı etkileyebilir.
+
+7. ShelveLoc: Her konumdaki araba koltuklarının raf konumunun kalitesini gösteren Kötü, İyi ve Orta düzeyli bir faktör.
+
+8. Yaş: Yerel nüfusun ortalama yaşı.
+
+9. Eğitim: Her konumdaki eğitim düzeyi.
+
+10 Kent: Mağazanın kentsel veya kırsal bir konumda olduğunu belirten Hayır ve Evet düzeylerine sahip bir faktör.
+
+11. ABD: Mağazanın ABD'de olup olmadığını belirten Hayır ve Evet düzeylerine sahip bir faktör.
+
+Daha analize başlamadan `Sales`, `CompPrice` ve `Price` değişkenlerin açıklamasında gösterildiği gibi diğer değişkenlerle çoklu bağlantı problemiyle modellemede karşılaşa biliriz.
+```{r include=FALSE}
+md.pattern(Carseats)
+```
+
+```{r echo=FALSE}
+smpl_size <- floor(0.7 * nrow(Carseats))
+set.seed(2022900191)
+train_id <- sample(1:nrow(Carseats), size = smpl_size)
+train <- Carseats[train_id,]
+test <- Carseats[-train_id,]
+```
+
+# Tanımlayıcı İstatistikler
+## Özet İstatistikler
+```{r echo=FALSE}
+summary(train)
+```
+## Sayısal Değişkenlerin Standart Sapmaları
+```{r echo=FALSE}
+apply(train[,-c(7,10,11)],2, sd)
+```
+ilk bakışta bütün sayısal değişkenlerin özellikle hedef değişken yani satış, aralık ve rangelerine nispeten mean ile medianları bir birine çok yakın olduklarını gözlemliyoruz.
+Ortalamadan 2 Standart Sapma uzaklığında yüzde 95 üzeri verilerimizin olduğunu bilerek; Sales, CompPrice, Advertising ve Price değişkeninin de minimum ve maksimum değerleri bu aralığın çok dışında kaldığından ilerideki analizlerde bunlarda *`Outlier`* görebiliriz.
+
+## Sayısal Değişkenlerin Çarpıklıkları
+```{r echo=FALSE}
+apply(train[-c(7,10,11)],2, skewness)
+```
+1. *Sales* : aralığı 15.63 (bin üzerinden) ve göz ardı edilecek sağa çarpıktır.
+2. *CompPrice* : aralığı 98 ve normale yakındır.
+3. *Income* : aralığı 99 ve göz ardı edilecek sağa çarpıktır.
+4. *Advertising* : aralığı 29 ve çok az sağa çarpıktır.
+5. *Population* : aralığı 495 ve göz ardı edilecek sola çarpıktır.
+6. *Price* : aralığı 167 ve göz ardı edilecek sola çarpıktır.
+7. *ShelveLoc* : Toplamda 147 tane Medium veri olduğu halde, İyi ve Kötü olan 133 tane veri var.
+8. *Age* : aralığı 55 ve göz ardı edilecek sola çarpıktır.
+9. *Education* : aralığı 8 ve göz ardı edilecek sağa çarpıktır. Ayrıca Education İnteger değer olsada kategorik davranış gösteriyor ve az seviyeden oluşmaktadır yalnız eğer seviyelerinin etkisi Sales üzerinde farklıysa model aşamasında seviye indirgemesi yapılmalıdır.
+10. *Urban* : Kentsel verinin kırsal verinin 2 katından daha fazla olması veri analizi için önemli etken olabilir.
+11. *Us* : Verinin Amerikada olmasının olmamasının 1.5 katından fazla olması veri analizi için önemli etken olabilir.
+Toplamda değişkenler farklı aralıklar ve birimlerden oluşmaktadırlar.
+
+## Sayısal değişkenlerin Boxplot grafikleri
+```{r echo=FALSE, out.height="60%",out.width="60%"}
+my_pallete <- brewer.pal(n=8, name = "Pastel2")
+par(mfrow= c(2,4))
+for(i in c(1,2,3,4,5,6,8,9)){
+  
+  boxplot(train[,i], main = names(train)[i], col = my_pallete[i])
+}
+```
+\textcolor{blue}{Sayısal değişkenlerin Boxplot grafiklerinden median ve quartile lar çizgisine bakarak da özet istatistiklerdeki ifadeleri tsepit edebiliriz, örneğin değişkenlerin normal veya normale yakın dağıldıkları ve daha önce de söylediğimiz gibi Sales, CompPrice ve Price değişkenlerinin az bir miktarda uç değer barındırdıklarına ilişkin yorumda bulunabiliriz.}
+
+
+## Kategorik değişkenlerin Boxplot grafikleri
+```{r echo=FALSE, out.height="60%",out.width="60%"}
+train$Education <- as.factor(train$Education)
+indexes = sapply(train, is.factor)
+indexes["Sales"] = TRUE
+train[,indexes]%>%
+  gather(-Sales, key = "var", value = "value") %>% 
+  ggplot(aes(x = value, y = Sales, color = value)) +
+  geom_boxplot() +
+  facet_wrap(~ var, scales = "free")+
+  theme(axis.text.x = element_text(angle = 30, hjust = 0.85),legend.position="none")
+```
+- \textcolor{blue}{Kategorik değişkenlerin etkisini Bağımlı değişken üzerinde daha sağlıklı analiz edebilmek için boxplotlarına bakıldığında `Education`, `ShelveLoc`, `Urban` ve `US` değişkenlerinin seviyelerinin hepsi Sales değişkeninin normal dağıldığını ve mean ile medianının hepsinde 7 civarında olduğunu gösterirken, sadece SelveLoc değişkeninin `Good` seviyesi etkin olmuş ve ortalamayı 11 gösteriyor, ileride bu değişkeni iki seviyeye düşürebiliriz.}
+
+- \textcolor{blue}{Görüldüğü gibi Education'de Dağılımlar aynı oldukları için herhangi bir seviye birleştirme anlamsızdır, modelde buna kesin karar verilecektir. ve bu değişkenin kategorik olması 7 tane katsayı ekleyeceği için modeli karmaşıklaştırır. O yüzden nümerik şekline geri çeviriyoruz.}
+
+# Matris Plot ve Korelasyon Analizi
+```{r echo=FALSE, message=FALSE, warning=FALSE, , out.height="90%",out.width="90%"}
+train$Education <- as.numeric(train$Education)
+par(mfrow=c(1,1))
+cor.data <- cor(train[-c(7,10,11)])
+cor.data
+corrplot.mixed(cor.data, upper = "pie", tl.cex=0.58)
+pairs.panels(train[-c(7,10,11)], main="Scatter Plotlar ve histogramlar")
+```
+
+**Plotlar ve Korelasyon Matrisi İncelendiğinde**
+
+- Bağımlı değişkenin sayısal bağımsız değişkenlerden CompPrice(Rakip Fiyat Belirlemesi: 0.04) ve Population(Nüfus: 0.03) ile çok düşük ilişkisi olduğu saptanmıştır ve bunlar modelden kaldırılabilir.
+
+- Advertising(Reklam : 0.24) ve Income(gelir düzeyi : 0.20) Birim Satışıyla kuvvetsiz pozitif yönlü ilişki mevcuttur.
+
+- Price (ürün fiyatı: -0.45) diğerlerine nispeten en kuvvetli, Age (konumdaki ortalama yaş: -0.23) birim satışıyla negatif yönlü ilişkilidirler, fiyat ve yaş arttıkça ürün satışı azalıyor ve satışı olumsuz etkilemektedirler.
+
+- Education(-0.07), Population ve CompPrice değişkenleri hedef değişkenin varyansını açıklamakta çok etkisiz kalmışlardır, ve onlar olmadan model ile devam edebiliriz.
+
+- *\textcolor{red}{Çoklu Bağlantı kapsamında}* Population; Advertising ve CompPrice ile orta düzeyde ayrıca CompPrice da Price ile olağanüstü Çoklu Bağlantı problemi çıkarması öngörülebilir.
+
+- Buradan ileride Population ve CompPrice değişkenlerini bağımlı değişkenle ilişkileri olmadığı halde bağımsız değişkenlerle de Çoklu Bağlantı kurdukları için modelden çıkarmalıyız yorumunu çıkardık.
+
+**İstatistiksel Hipotez Testleri veya Varsayım Kontrolü %95 güvenle bu iki yol izlenerek tespit edilir**  
+*Eğer p_value > 0.05 null hipotez reddedilemez*  
+*Eğer p_value < 0.05 null hipotez reddedilir*
+
+## Bağımlı Değişkenin Normallik Testi
+*\textcolor{red}{Ho : Sales değişkeni normal dağılmıştır.}*  
+*\textcolor{red}{Ha : Sales değişkeni normal dağılmamaktadır.}*
+
+- *Uygun Durum* : p_value > 0.05
+```{r echo=FALSE}
+shapiro.test(train$Sales)
+```
+Bağımlı değişken 0.95 güvenle normal dağılmaktadır.  
+Böylelikle analizin ilerleyen kısımlarında artıkların normal dağıldığı varsayımını engelleyebilen bir durum şuanlık yok.
+
+
+# Model Oluşturma
+
+```{r echo=FALSE}
+model1 <- lm(Sales ~ CompPrice + Income + Advertising + Population + Price + ShelveLoc + Age + Education + Urban + US ,data=train)
+summary(model1)
+```
+*\textcolor{red}{İlk başta Full Modeli kuruyoruz}*  
+Düzeltilmiş R-kare ile R-kare oldukça birbirine yakın çıkmış, model ve içindeki bağımsız değişkenler iyi bir şekilde Satış değişkeninin varyansının **%87.5**si nı açıklamıştır.
+
+## Model Varsayımları
+### Model Geçerliliği F Hipotez Testi  
+*\textcolor{red}{Ho : Bağımlı değişken ve bağımsız değişkenler arasında doğrusal bir ilişki bulunmamaktadır.}*  
+*\textcolor{red}{Ha : Bağımlı değişken ile en az bir bağımsız değişken arasında doğrusal bir ilişki bulunmaktadır.}*  
+
+- *Uygun Durum* : Ha: p_value < 0.05  
+F istatistik değeri 170.3 payda 11 ve paydada 268 Serbestlik derecesiyle 0.05 önem düzeyinde Ho reddedilmiştir ve model anlamlı çıkmıştır ve bağımlı değişken ile en az bir bağımsız değişken arasında doğrusal bir ilişki bulunmaktadır.  
+
+### Model Katsayılarının Anlamlılığına İlişkin Hipotez Testi
+*\textcolor{red}{Ho : katsayı 0'dan önemli ölçüde farklı değildir.}*  
+*\textcolor{red}{Ha : katsayı 0'dan önemli ölçüde farklıdır.}*  
+
+- *Uygun Durum* : Ha: p_value < 0.05  
+1. `Population`, `Education`, `UrbanYes` ve `USYes` katsayılarında 0.05 önem düzeyinde anlamsız çıkmışlardır ve *0'dan önemli ölçüde farklı değildir* varsayımı reddedilmiştir.
+2. Diğer değişkenlerin katsayıları %95 güvenle anlamlıdır
+
+## Standarlaştırılmış artıklar  
+Artıkların yayıldığının bir ölçüsü olan Residual standard error, modelin tahmin ettiği değerlerden gözlemlenen Sales değerlerinin ortalama sapmasını,  280 tane train verisinden 268 serbestlik derecesiyle iyi bir miktar olarak 1.045 göstermektedir, ayrıca artıklar `-2.85` ve `3.34` arasında değişmektedirler.
+
+## Katsayılar
+*\textcolor{red}{Aşağıdaki yorumlar, katsayıların her biri diğer değişkenler modelde ve sabit iken geçerlidir.}*
+
+1. *\textcolor{red}{Intercept}* Sales(Satış)in bağımsız değişken olmaksızın miktarını 5.99 gösteriyor ve model sabitidir.
+2. *\textcolor{red}{CompPrice}* rakip fiyatı 1 birim artarsa Satışda 0.088 birimlik artış kaydedilir.
+3. *\textcolor{red}{Income}* gelir 1 birim artarsa Satışda 0.015 birimlik artış kaydedilir.
+4. *\textcolor{red}{Advertising}* reklam 1 birim artarsa Satışda 0.125 birimlik artış kaydedilir.
+5. *\textcolor{red}{Population}* toplum sayısı 1(bin) birim artarsa Satışda yaklaşık 0.00025 birimlik azalış kaydedilir.
+6. *\textcolor{red}{Price}* ürün fiyatı 1 birim artarsa Satışda 0.09 birimlik azalış kaydedilir.
+7. *\textcolor{red}{ShelveLocGood}* modelde ise ve Medium ile Bad 0 iken Satışda 4.93 birimlik artış kaydedilir.
+8. *\textcolor{red}{ShelveLocMedium}* modelde ise ve Good ile Bad 0 iken Satışda 2.047 birimlik artış kaydedilir.
+9. *\textcolor{red}{ShelveLocBad}* modelde ise ve Good ile Medium 0 iken Satışda toplamda 2.047 + 4.93 = 6.977 birimlik artış kaydedilemez.
+10. *\textcolor{red}{Age}* Yaş 1 birim artarsa Satışda 0.047 birimlik azalış kaydedilir.
+11. *\textcolor{red}{Education}* Eğitim 1 birim artarsa Satışda 0.026 birimlik azalış kaydedilir.
+12. *\textcolor{red}{UrbanYes}* modelde ise ve UrbanNo 0 iken Satışda 0.079 birimlik artış kaydedilir.
+13. *\textcolor{red}{UrbanNo}* modelde ise ve UrbanYes 0 iken Satışda 0.079 birimlik artış kaydedilemez.
+14. *\textcolor{red}{USYes}* modelde ise ve USNo 0 iken Satışda 0.28 birimlik azalış kaydedilir.
+15. *\textcolor{red}{USNo}* modelde ise ve USYes 0 iken Satışda 0.28 birimlik azalış kaydedilemez.
+
+## VIF 
+
+```{r echo=FALSE}
+vif(model1)
+```
+
+### Varsayım kontrolü  
+*\textcolor{red}{GVIF < 5 ve Alpha= 0.05 ise çoklu bağlantılık problemi yoktur.}*
+VIF değerleri incelendiğinde daha önce konsept olarak veri tanıtımında ve korelasyon analizinde \textcolor{red}{Population, CompPrice ve Price değişkenleri} bir birleri ile ilişkili olabilecekleri her ne kadar gözükse de aslında **Multicollinearity Testi** yapıldığında bu veri seti kendi yapısına göre değişkenler arasında herhanhi bir çoklu bağlantılık problemi barındırmadığı saptanmıştır.  
+
+\begin{center}\textcolor{blue}{Modelde değişkenler arasında bağlantı olmaması bu deişkenlerin Sales üzerine olan etkisine üçüncü değişkenin etkisinin olmaması anlamında iken bir de Değişkenlerin Saçılım diagramları ve histogramlarında görüldüğü gibi de herhangi bir curve ve doğrusal olmayan veya polynom dağılım olmaması için etkileşim ve polynom terimlerini eklememize ve dolayısıyla model karmaşıklaştırılmasına da sebep kalmamıştır.}\end{center}
+
+# Olası En iyi Alt Küme Seçimi
+
+Model alternatiflerini oluşturmayı stepwise makine öğrenimi algoritmasına bırakıyor ve ona dahil ettiğimiz Full modelde `Population`,`Education`, `Urban` ve `US` katsayılarının anlamsız çıktığı ve nihai modelimizde etkisiz olduklarını aklımızda tutuyoruz.
+
+**Sonuçlar Grafikler ve kodlama ile tespit edilecektir**
+
+## Grafikler
+```{r echo=FALSE, out.height="80%",out.width="80%"}
+all.steps <- ols_step_all_possible(model1)
+par(mfrow=c(2,2))
+plot(all.steps)
+```
+
+**AIC, BIC, Adj.R square ve Cp plotları İncelendiğinde**
+
+- Grafiklerden de anlaşıldığı gibi 7 parametreli'den 10 parametreliye kadar Cp dışında plotların hepsinde parametre sayısına ilişkin belirlenen Indexler aynı sonuçlar gösterilmekte, bu da cp nin model doğruluğu ve basitliğini gösteren performans metriği olduğu içindir.
+- Ayrıca model seçmek için en iyi modeller arasından 2 tane alternatif model seçmek Adj. r squared üzerinden hepsinin çok birbirine yakın olduğundan, sadece Cp kriteri kullanabileceğimiz metriktir.
+
+## Kod Çıktıları
+```{r echo=FALSE}
+paste(order(all.steps$cp)[1:10])
+print("soldan sırasıyla minimum cp model indexleri")
+```
+*Burada Sadece en az 10 Cp değerini görmekteyiz, ama bunların bazısı yanlılığa ve overfittinge yol açmaktadır.*  
+
+\textcolor{red}{Yanlılığı, overfittingi ve model karmaşıklığını önlemek için Cp değerinin parametre sayısaından az ve yakın olması ve bu kıyaslama şartını barındıran olası tüm modeller istenilmiştir.}
+```{r echo=FALSE}
+f <- all.steps[all.steps$adjr %in% sort(all.steps$adjr, decreasing = T) & (all.steps$cp < all.steps$n) , ]
+data.frame("N"=f$n,"predictors"=f$predictors)
+data.frame("Index"=f$mindex, "Cp"=round(f$cp,2), "adjr"=round(f$adjr,2))
+
+```
+
+```{r echo=FALSE}
+
+for(i in 1:length(train[,-1])){
+  minCp = min(all.steps[all.steps$n==i,][,"cp"])
+  maxRsqured = max(all.steps[all.steps$n==i,][,"adjr"])
+  print(noquote(paste(i,sep = ""," Parametreli modellerin ")))
+  print(noquote(paste("En Dusuk Cp si ",round(minCp,2) ,"- En Yuksek R karesi"," ", round(maxRsqured, 2))))
+  print(noquote(paste("model index:", all.steps[all.steps$cp == minCp,][,"mindex"])))
+  print(noquote(paste("Degiskenler:",all.steps[all.steps$cp == minCp,][,"predictors"])))
+  print(noquote((rep("_",38))))
+}
+```
+## Gerekçeler ve Seçim
+1. Tahmin edicilerimiz üzerinden 1 parametreli model den 6 parametreli modellere kadar hepsinin Cp değerleri parametre sayısından fazla olduğu için yanlıdırlar.
+
+2. 7 parametreli model den 10 parametreli modele kadar da bakıldığında kategorik değişkenlerde de boxplot incelemesinde gördük USYes ve USNo seviyelerinin Sales üzerinde aşırı farklı etkileri olmadığından dolayı burada da oynama sadece anlamsız olan `Education`, `Population` ve `Urban` değişkenleri üzerinde yapılmıştır. Alternatif 2 model için en az değişkenle yani 7 ve 8 parametreli model ile devam etmek **Model Geliştirilmesi** için de doğru bir seçimdir.
+
+3. Bu değişken katsayılarının p_value'ları `US`< `Education`< `Urban` < `Population` sırası şeklindedir, aynı sırayı Cp için de görebiliriz bu da katsayı anlamlılığının model yanlılığını aynı yönde etkileyeceğinin bir göstergesidir.
+
+- **Birinci Alternatif Model: 7 parametreli modeller içinde sadece 1 tane yansız olan \textcolor{red}{Model 848} ile devam edilmiştir.** 
+
+- **İkinci Alternatif Model: Full modelde üç tane anlamsız değişken içinde en az p_value su olan yani`Education` i barındıran, 8 parametreli model ile \textcolor{red}{Model Geliştirme} si için de yaralı olacağı için yani \textcolor{red}{Model 968} ile devam edilmiştir.**  
+**Model 848 ve Model 968 Alternatif modellerdir**
+```{r include=FALSE}
+model_alternative_1 <- lm(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age + US , data = train)
+model_alternative_2 <- lm(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age + Education + US, data = train)
+```
+
+
+# Tahmin Performansı  
+Alternatif modellerin tahmin performansı üzerinden en uygun modele olana karar verilecektir.  
+Kurulan iki modeli kullanarak test seti üzerinde `Sales` değişkeni için tahminler üretildikten sonra bu tahmin edilen değerlere **En küçük hata kareler** yönteminin çeşitli metriklei en uygun modeli bulmak için uygulanacaktır.
+```{r include=FALSE}
+prediction1 <- predict(model_alternative_1, newdata = test)
+prediction2 <- predict(model_alternative_2, newdata = test)
+```
+
+
+
+```{r echo=FALSE}
+RMSE1 <- RMSE(prediction1, test$Sales)
+RMSE2 <- RMSE(prediction2, test$Sales)
+######################################
+MAE1 <- MAE(prediction1, test$Sales)
+MAE2 <- MAE(prediction2, test$Sales)
+######################################
+PRESS1 <- ols_press(model_alternative_1)
+PRESS2 <- ols_press(model_alternative_2)
+######################################
+R2_1 <- caret::R2(prediction1 , test$Sales)
+R2_2 <- caret::R2(prediction2 , test$Sales)
+#####################################
+AIC1 <- AIC(model_alternative_1, k=12) #k eşittir katsayı sayısı + ıntercept + variance
+AIC2 <- AIC(model_alternative_2, k=12)
+#####################################
+BIC1 <- BIC(model_alternative_1)
+BIC2 <- BIC(model_alternative_2)
+#####################################
+model1_predData <-data.frame(actual= test$Sales,prediction1)
+model2_predData <-data.frame(actual= test$Sales,prediction2)
+
+model1accuracy <- mean(apply(model1_predData,1, min) / apply(model1_predData,1, max))
+model2accuracy <- mean(apply(model2_predData,1, min) / apply(model2_predData,1, max))
+#####################################
+
+cbind(Model =c(1,2), RMSE=round(c(RMSE1,RMSE2),4), MAE=round(c(MAE1,MAE2),4), PRESS=round(c(PRESS1,PRESS2),4), AIC=c(AIC1,AIC2),BIC= c(BIC1,BIC2),Accuracy=c(model1accuracy,model2accuracy),R2=round(c(R2_1,R2_2),4))
+
+```
+Model performansına ilişkin metrikleri incelediğimizde artıkların kareler ortalamasının kökü ikisinde yaklaşık aynı olmakla birlikte, mutlak ortalaması, **En önemlisi** yani fit değerlerinin toplam hata kareleri, AIC ve BIC için model 1 de daha az çıkmıştır, ortalama gerçek değere yakın doğru tahmin Accuracy kriteri olarak da model 1 daha iyi çıkmıştır ve son olarak da `Sales` değişkeninin test setinde varyansının yüzdelik açıklanması yani R2 değerinde de göz ardı edilecek farkla Model 1 daha iyi çıkmıştır.  
+
+**Bu metriklerden ilereleyerek ve 1 tane daha az anlamsız değişkeni olan Model Alternative 1 e karar verilmiştir.**
+
+# Artıklar
+
+## Grafikler
+```{r echo=FALSE, out.height="40%",out.width="40%"}
+
+ols_plot_resid_hist(model_alternative_1)
+```
+```{r echo=FALSE, out.height="60%",out.width="60%"}
+hist(model_alternative_1$residuals, ylab = "Frekans", xlab = "Hatalar", main = "Hataların Histogram Grafiği", col="pink",
+     border="red", probability = T, ylim = c(0, 0.4), xlim = c(-4,4))
+
+
+```
+
+Hataların Dağılım ve Yoğunluk histogram grafiği incelendiğinde Normal dağıldığını görüyoruz, çok hafif ve göz ardı edilecek sağa çarpık olduğu görünüyor ve daha önce de box-plot grafiklerinde de gördüğümüz gibi çok az üst outlierin olduğu buna sebebiyet verebilir.
+
+```{r echo=FALSE, out.width = "95%", out.height = "95%"}
+par(mfrow=c(2,2))
+plot(model_alternative_1)
+```
+1. Sol üstteki plot modelin fit ettiği değerlerinin hatalarının rassal ve hiçbir trend olmadan yani sabit varyanslı olaraka dağıldığını gösteriyor. `208`, `357` ve `358` uç değerleri varyansın genişlemesi ve heterojenliğine sebebiyet vermişler.
+
+2. Sol alttaki standartlaştırılmış hatalar plotında da `208`, `357` ve `358` uç değerlerinin homojenliği az bir şekilde etkiledikleri tespit edilmiştir.
+
+3. Sağ üsteki qqnorm plotta herhangi bir pattern olmazken artıkların bariz bir şekilde düz çizgi üstünde oldukları Quartaillara göre hataların dağılımının normal olduğunun kuvvetli bir göstergesidir. `208`, `357` ve `358` değerleri burada da aykırı değer olarak saptanmışlardır.
+
+4. Sağ alttaki Kaldıraç plotında da standartlaştırılmış artıklar `285` 3'e yakın , `357` 3'e yakın  ve `358` 3'ten fazla olarak etkin gözlem gösterilmişlerdir. *Kaldıraç bölümünde analiz edilecektir*  
+- Bu aykırı niteliğindeki gözlemleri **Model Geliştirme** de analiz edeceğiz.
+
+## Varsayımlar
+### Hataların Normalliği
+
+*\textcolor{red}{Ho: Hatalar Normal dağılmaktadır.}*
+*\textcolor{red}{Ha: Hatalar Normal dağılmamaktadır.}*
+
+**Shapiro Wilk Testi**  
+- *Uygun Durum* Ho: p_value > 0.05
+```{r echo=FALSE}
+shapiro.test(model_alternative_1$residuals)
+```
+Hatalar p_value: 0.89 olarak beklendiği gibi 95% güvenle normal dağılmaktadır.
+
+### Hataların Sabit ve Homojen Varyanslılığı
+
+*\textcolor{red}{Ho: Hatalar Sabit Varyanslıdır.}*
+*\textcolor{red}{Ha: Hatalar Sabit Varyanslı değildir.}*
+
+**Breusch-Pagan Testi**
+- *Uygun Durum* Ho: p_value > 0.05
+
+```{r echo=FALSE}
+bptest(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age + US, data=train)
+```
+Hatalar p_value: 0.18 olarak beklendiği gibi sabit ve homojen varyanslıdır.
+
+# Aykırı değer
+
+```{r echo=FALSE, out.height="95%",out.width="95%"}
+
+standardized.residuals <- model_alternative_1$residuals/rmse(model_alternative_1)
+plot(model_alternative_1$fitted.values,standardized.residuals, xlab = "Tahmin Degerleri", ylab = "Standarlaştırılmış Artıklar")
+abline(h=0)
+abline(h=-3)
+abline(h=3)
+```
+**Tahmin değerleri ile standartlaştırılmış artıklar grafiği incelendiğinde;**
+```{r echo=FALSE}
+which(abs(standardized.residuals)>3)
+
+```
+Standartlaştırılmış artık değeri -3'den küçük, 3'den büyük olan 1 adet artık saptanmıştır. Grafiklerde saptadığımız train setinin 50. değeri, uç değer olarak yorumlanır. Bu aykırı değeri Model geliştirmede kaldırabiliriz.
+
+
+# Kaldıraç Analizi 
+
+```{r echo=FALSE, out.height="95%",out.width="95%"}
+st.res <- model_alternative_1$residuals/sd(model_alternative_1$residuals)
+plot(hatvalues(model_alternative_1),st.res)
+abline(h=c(-2,2),v=2*mean(hatvalues(model_alternative_1)))
+```
+Hat değerleri ile standardized residuals arasındaki grafik incelendiğinde hiç kötü kaldıraç olmadığı gözlemlenmiştir. İyi kaldıraç sayısı ise 2 olarak saptanmıştır. 
+```{r echo=FALSE}
+print(noquote("İyi kaldıraçlar"))
+which(hatvalues(model_alternative_1)>2*mean(hatvalues(model_alternative_1)))
+print(noquote("İyi kaldıraçlar sayısı"))
+length(which(hatvalues(model_alternative_1)>2*mean(hatvalues(model_alternative_1))))
+```
+İyi kaldıraçlar train setinin 49. ve 198. gözlemleridir.
+# Etkin Gözlem - Cook's Distance  
+Etkin gözlemleri analiz yapmak için Cook's Distance'i kullanmamız gerekiyor.
+
+```{r echo=FALSE, out.height="95%",out.width="95%"}
+plot(train$Sales,cooks.distance(model_alternative_1))
+
+abline(h = 4 / (length(train$Sales) - length(coefficients(model_alternative_1))), col = "red")
+
+```
+- Cook's Discance grafiği incelendiğinde 12 adet etkin gözlem olduğu saptanmıştır.  
+- Demek ki train setinde 280 gözlemden 12 tanesi modelin eğimine çok etki yapıyor.
+- Model geliştirmede bu konuda katsayılara yaptığı etkisine yorum yapılacak.
+
+```{r echo=FALSE}
+print(noquote("Etkin gözlem sayısı"))
+length(which(cooks.distance(model_alternative_1) > 4/(length(train$Sales)-9)))
+# Cooks Distance'a göre etkin gözlemlerin indeks numaraları aşağıdaki gibidir. 
+print(noquote("Etkin gözlemler"))
+which(cooks.distance(model_alternative_1) > 4/(length(train$Sales)-9))
+```
+Kurduğumuz regresyon modelinde 12 tane etkin gözlem vardır, ki bunların içinden aykırı değer olarak saptadığımız 50.ci train gözlemi dikkat çekmektedir.
+
+# Model Geliştirme
+
+1. \textcolor{red}{Full Model Kuruldu, Stepwise Modellemede 848 ve 968'ci modeller seçildi.}
+
+2. \textcolor{red}{Performans metriklerine göre Model Alternative 1 olarak 848. Model ile devam edildi.}
+
+3. **\textcolor{red}{Aykırı değer analizinde 50. gözlem Verinin Tek uç değeri olarak hem aykırı ve hem etkin gözlem olduğu için veriden kesinlikle kaldırılmalıdır.}**
+
+```{r echo=FALSE}
+train_new<- train[-50,]
+model1_eff <- lm(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age + US,data = train_new)
+yeni_adj <- summary(model1_eff)$adj.r.squared
+
+prediction <- predict(model1_eff,newdata = test)
+yeni_r2_test<- caret::R2(prediction, test$Sales)
+
+eski_adj <- summary(model_alternative_1)$adj.r.squared
+eski_r2_test<- caret::R2(prediction1, test$Sales)
+
+noquote(cbind(" "=c("eski", "yeni"), Aykırı = c("Var","Yok"), R_Squared_test=round(c(eski_r2_test, yeni_r2_test),4), R_Squared_train=round(c(eski_adj,yeni_adj),4)))
+```
+- \textcolor{blue}{Bu aykırı değeri çıkardıktan sonra hem train ve hem test seti birbirine çok yakın olmakla beraber her ikisinde R squared'de çok az bir artış saptanmıştır.}
+
+4. **\textcolor{red}{Etkin gözlemlerin varken ve yokken model katsayıları üzerine bıraktığı etki hesaplanmıştır.}**
+```{r echo=FALSE}
+CD_model <- lm(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age + US ,data = train_new[-which(cooks.distance(model1_eff) > 4/(length(train_new$Sales)-9)),])
+
+influencepoint_coefValue = summary(CD_model)$coefficients[,"Estimate"] - summary(model1_eff)$coefficients[,"Estimate"]
+influencepoint_coefValue
+```
+- Değerlerin etkin gözlemlerin var olduğu ve var olmadığı durumlarda katsayı üzerine bıraktığı etkilerin farkı olarak hepsinin miktarı çok azdır yani etkin gözlemler regresyon modeli ve bütün diğer verilerle aynı eğim ve yönde olduğu yorumu yapılabilir ve bu yüzden etkin gözlemlerden ilerleyerek herhangi bir değişiklik yapılmamıştır.
+
+5. **\textcolor{red}{US değişkenini anlamsız olduğu için Model den çıkarıyoruz}**
+
+```{r echo=FALSE}
+final_model <- lm(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age ,data = train_new)
+summary(final_model)
+adj_new_withoutUS <- summary(final_model)$adj.r.squared
+shapiro.test(final_model$residuals)
+bptest(Sales ~ CompPrice + Income + Advertising + Price + ShelveLoc + Age ,data = train_new)
+```
+- Model Alternative 1 den Aykırı değer 50. gözlem ve anlamsız US değişkeni kaldırıldıktan sonra final modeldeki Adj.R kare çok az bir miktarda full modele göre artmıştır ve R kare değeri 0.8753, dir. 
+- Bütün Varsayımlar **Katsayılar anlamlılığı, model geçerliliği, hataların normal dağılması ve sabit varyanslılığı** sağlanmıştır.
+
+```{r echo=FALSE}
+prediction <- predict(final_model, newdata = test)
+caret::R2(prediction, test$Sales)
+R2_new_withoutUS <- caret::R2(prediction, test$Sales)
+```
+Test seti için final modelle elde edilen R kare değer ilk modele göre artmıştır.  
+
+6. \textcolor{red}{SONUÇ: Aşağıdaki gibi final modelde train seti için en iyi açıklayıcılık varken test seti için açıklayıcılığı yüksek ve trainle yaklaşık aynı olmakla beraber hafif bir düşüş yaşanmıştır}
+```{r echo=FALSE}
+noquote(cbind(" "=c("first", "without outlier","final model without US and outlier"), R_Squared_test=round(c(eski_r2_test, yeni_r2_test,R2_new_withoutUS),4), R_Squared_train=round(c(eski_adj,yeni_adj,adj_new_withoutUS),4)))
+```
+7. Anova
+```{r echo=FALSE}
+round(anova(final_model),2)
+cat(noquote("Değişkenler içinde seviyelerine göre farklı\ngruplaşmalar sonucunda ortalmalarının birbirinden\nfarklı olmadığını ANOVA ile hepsinde p_value< 0.05\nve dolayısıyla homojen ve sabit varyanslı ve grouplar\narasında heterojenliğin anlamlı olduğunu görmekteyiz."))
+```
+
+8. Final Modelin Katsayılarının Güven Aralığı
+```{r echo=FALSE}
+confint(final_model)
+print(noquote("Değişken katsayılarının %95 güvenle hangi aralıkta olabileceklerini görüyoruz"))
+
+```
+
+
+# 100. Gözlemle tahmin
+
+```{r echo=FALSE}
+prediction_c <- predict(final_model, newdata = test[100,], interval = "confidence")
+prediction_p <- predict(final_model, newdata = test[100,], interval = "prediction")
+print(noquote("100. gözlem için güven aralığı"))
+cbind("Actual" = test$Sales[100],"CONFIDANCE" =prediction_c)
+print(noquote(rep("-",16)))
+print(noquote("100. gözlem için kestirim aralığı"))
+cbind("Actual" = test$Sales[100],"PREDICTION" =prediction_p)
+```
+100. gözlem için kestirim aralığının güven aralığından geniş olacağını biliyorken alt ve üst sınırını her iki durum için fit ettiğimiz 6.18 `Sales` değeri için görmekteyiz. 
+
+```{r echo=FALSE}
+RMSE_f <- RMSE(prediction_c[,"fit"], test$Sales[100])
+######################################
+MAE_f <- MAE(prediction_c, test$Sales[100])
+######################################
+PRESS_f <- ols_press(final_model)
+######################################
+AIC_f <- AIC(final_model, k=8) #k eşittir katsayı sayısı + ıntercept + variance
+#####################################
+BIC_f <- BIC(final_model)
+#####################################
+modelfinal_predData <- data.frame(actual= test$Sales[100],prediction_c)
+
+modelfinalaccuracy <- mean(apply(modelfinal_predData,1, min) / apply(modelfinal_predData,1, max))
+#####################################
+
+noquote(cbind(" " =c(100,"Model1"), RMSE=round(c(RMSE_f,RMSE1),4), MAE=round(c(MAE_f,MAE1),4), PRESS=round(c(PRESS_f,PRESS1),4), AIC=round(c(AIC_f,AIC1),3), BIC=round(c(BIC_f,BIC1),3), Accuracy=round(c(modelfinalaccuracy,model1accuracy),3)))
+```
+PRESS, AIC ve BIC değerlerinde bir iyileşme varken sadece anlamlı değişkenler katsayıları modelde kaldığı için RMSE, MAE değerlerinde artış görüldüğü söylenebilir, ve o yüzden de ilk modele göre daha düşük ve 79% doğruluk oranıyla final model bu gözlemin `Sales` değerini tahmin etmektedir.
+
+
+
+
